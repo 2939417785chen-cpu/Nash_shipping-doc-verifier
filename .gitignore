@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local environment files (keep .env.example so setup steps stay clear)
+.env.*
+!.env.example
+
+# Large archives from the organizers
+*.zip
+
+# macOS system files
+.DS_Store
