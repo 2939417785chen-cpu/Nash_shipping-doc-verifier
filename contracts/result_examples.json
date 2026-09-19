@@ -1,0 +1,169 @@
+{
+  "schema_version": "1.0",
+  "examples": [
+    {
+      "email_id": "email_example_ok",
+      "email": {
+        "from": "shipping@example.com",
+        "subject": "Draft BL verification request",
+        "body": "Please compare the attached SI and draft BL.",
+        "attachments": [
+          "attachments/email_example_ok_SI.txt",
+          "attachments/email_example_ok_BL.txt"
+        ]
+      },
+      "category": "BL_COMPARISON",
+      "classification_confidence": 0.98,
+      "status": "OK",
+      "review_reason": null,
+      "has_defect": false,
+      "defect_fields": [],
+      "comparisons": [
+        {
+          "field": "shipper",
+          "si_value": "APRIL FAR EAST (M) SDN BHD",
+          "bl_value": "APRIL FAR EAST (M) SDN BHD",
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "consignee",
+          "si_value": "EAST BRIGHT FZ-LLC",
+          "bl_value": "EAST BRIGHT FZ-LLC",
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "notify_party",
+          "si_value": "EAST BRIGHT FZ-LLC",
+          "bl_value": "EAST BRIGHT FZ-LLC",
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "port_of_loading",
+          "si_value": "NANTONG, CHINA",
+          "bl_value": "NANTONG, CHINA",
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "port_of_discharge",
+          "si_value": "KARACHI, PAKISTAN",
+          "bl_value": "KARACHI, PAKISTAN",
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "container_count",
+          "si_value": 6,
+          "bl_value": 6,
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "gross_weight_kg",
+          "si_value": 131058,
+          "bl_value": 131058,
+          "match": true,
+          "confidence": 0.99
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "email_id": "email_004",
+      "email": {
+        "from": "docs@vitalsolutions.sg",
+        "subject": "REQUEST BL DRAFT _ PO 26067_ COATED IVORY BOARD__138MT",
+        "body": "Attached are the SI and draft BL. Please check the details and confirm.",
+        "attachments": [
+          "attachments/email_004_SI.txt",
+          "attachments/email_004_BL.txt"
+        ]
+      },
+      "category": "BL_COMPARISON",
+      "classification_confidence": 0.99,
+      "status": "MISMATCH",
+      "review_reason": null,
+      "has_defect": true,
+      "defect_fields": [
+        "consignee",
+        "notify_party"
+      ],
+      "comparisons": [
+        {
+          "field": "shipper",
+          "si_value": "APRIL FAR EAST (M) SDN BHD",
+          "bl_value": "APRIL FAR EAST (M) SDN BHD",
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "consignee",
+          "si_value": "EAST BRIGHT FZ-LLC",
+          "bl_value": "UAB NOVAKOPA",
+          "match": false,
+          "confidence": 0.99
+        },
+        {
+          "field": "notify_party",
+          "si_value": "EAST BRIGHT FZ-LLC",
+          "bl_value": "UAB NOVAKOPA",
+          "match": false,
+          "confidence": 0.99
+        },
+        {
+          "field": "port_of_loading",
+          "si_value": "NANTONG, CHINA",
+          "bl_value": "NANTONG, CHINA",
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "port_of_discharge",
+          "si_value": "KARACHI, PAKISTAN",
+          "bl_value": "KARACHI, PAKISTAN",
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "container_count",
+          "si_value": 6,
+          "bl_value": 6,
+          "match": true,
+          "confidence": 0.99
+        },
+        {
+          "field": "gross_weight_kg",
+          "si_value": 131058,
+          "bl_value": 131058,
+          "match": true,
+          "confidence": 0.99
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "email_id": "email_example_review",
+      "email": {
+        "from": "operations@example.com",
+        "subject": "Please verify draft BL",
+        "body": "Please check the draft BL against our shipping instruction.",
+        "attachments": [
+          "attachments/email_example_review_SI.txt"
+        ]
+      },
+      "category": "BL_COMPARISON",
+      "classification_confidence": 0.97,
+      "status": "NEEDS_REVIEW",
+      "review_reason": "missing_attachment",
+      "has_defect": false,
+      "defect_fields": [],
+      "comparisons": [],
+      "warnings": [
+        "The draft Bill of Lading attachment is missing."
+      ]
+    }
+  ]
+}
