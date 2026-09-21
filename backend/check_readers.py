@@ -12,7 +12,7 @@ ATTACH_DIR = matches[0] / "attachments"
 counts = Counter()
 problems = []
 for path in sorted(ATTACH_DIR.iterdir()):
-    result = read_attachment(path)
+    result = read_attachment(path, ocr=False)
     counts[(path.suffix, result["status"])] += 1
     if result["status"] != "ok":
         problems.append((path.name, result["status"], result["note"]))

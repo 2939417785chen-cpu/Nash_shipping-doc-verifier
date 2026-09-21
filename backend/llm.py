@@ -98,19 +98,25 @@ def _is_retryable(error):
                ("429", "500", "503", "504", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE", "timed out"))
 
 
-def call_json(prompt, use_cache=True):
-    """Send a prompt, get a dict back. Cached, and retried a few times if Google is busy."""
+def call_json(prompt, use_cache=True, images=None):
+    """Send a prompt (and maybe pictures), get a dict back. Cached, and retried if Google is busy.
+
+    images is a list of (bytes, mime_type), for example [(png_bytes, "image/png")].
+    """
     model = _get_model()
-    cache_file = CACHE_DIR / (hashlib.sha256((model + "\n" + prompt).encode()).hexdigest() + ".json")
+    images = images or []
+    fingerprint = model + "\n" + prompt + "".join(hashlib.sha256(data).hexdigest() for data, _ in images)
+    cache_file = CACHE_DIR / (hashlib.sha256(fingerprint.encode()).hexdigest() + ".json")
     if use_cache and cache_file.exists():
         return json.loads(cache_file.read_text())
 
+    contents = [types.Part.from_bytes(data=data, mime_type=mime) for data, mime in images] + [prompt]
     last_error = None
     for attempt in range(5):
         try:
             response = _get_client().models.generate_content(
                 model=model,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json", temperature=0),
             )
@@ -242,3 +248,24 @@ def extract_fields(text, doc_type):
             value = str(value).strip() or None
         result[field] = {"value": value, "evidence": evidence}
     return result
+
+
+# -------------------------------------------------------------- read a picture
+
+TRANSCRIBE_PROMPT = """This is one page of a shipping document (a Shipping Instruction or a Bill of Lading),
+saved as a picture. Write down all the text on the page exactly as it is written.
+- Keep the order and the line breaks.
+- For tables, put each row on one line and separate the columns with " | ".
+- Do not summarize, translate or correct anything. Keep spelling, numbers and units as they are.
+- If a part is too blurry to read, write [unreadable] in its place.
+
+Return only JSON like this: {"text": "<all the text of the page>"}"""
+
+
+def transcribe_image(png_bytes):
+    """OCR with AI vision: give a page as a PNG picture, get the text on it."""
+    data = call_json(TRANSCRIBE_PROMPT, images=[(png_bytes, "image/png")])
+    text = str(data.get("text", "")).strip()
+    if not text:
+        raise LLMError("AI returned no text for the picture")
+    return text
