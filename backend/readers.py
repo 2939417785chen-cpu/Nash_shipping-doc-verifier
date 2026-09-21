@@ -53,7 +53,10 @@ def _ocr_pdf(path):
 
     If anything goes wrong the status stays 'scanned', so the pipeline can send it to a person.
     """
-    import llm  # loaded here, so the plain readers do not need the AI library
+    if __package__:
+        from backend import llm  # normal package execution from the repository root
+    else:
+        import llm  # allow: python backend/test_readers.py
     import pdfplumber
 
     try:

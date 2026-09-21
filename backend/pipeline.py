@@ -70,6 +70,31 @@ def _read_document(read_fn, path, use_ocr):
     return read_fn(path)
 
 
+def _attach_reading_metadata(result, read_results):
+    """Expose reader/OCR provenance to the review UI without changing scoring."""
+    result["document_reading"] = {
+        document_type: {
+            "status": reading.get("status"),
+            "ocr": bool(reading.get("ocr")),
+            "pages": len(reading.get("pages") or []),
+            "note": reading.get("note", ""),
+        }
+        for document_type, reading in read_results.items()
+    }
+    ocr_documents = [
+        document_type
+        for document_type, reading in read_results.items()
+        if reading.get("status") == "ok" and reading.get("ocr")
+    ]
+    if ocr_documents:
+        result.setdefault("warnings", []).append(
+            "AI OCR was used for "
+            + " and ".join(ocr_documents)
+            + "; verify the source evidence because image transcription may contain small errors."
+        )
+    return result
+
+
 def process_email(
     email,
     source,
@@ -88,8 +113,30 @@ def process_email(
 
     classify_fn = classify_fn or llm_module.classify_email
     compare_fn = compare_fn or compare.compare_fields
+    llm_error_type = llm_error_type or (
+        llm_module.LLMError if llm_module is not None else Exception
+    )
 
-    classification = classify_fn(email)
+    try:
+        classification = classify_fn(email)
+    except llm_error_type as error:
+        # The official schema has no UNKNOWN category and only BL_COMPARISON
+        # supports NEEDS_REVIEW. Preserve a complete, reviewable result instead
+        # of dropping the email when every configured model is unavailable.
+        classification = {
+            "category": "BL_COMPARISON",
+            "confidence": 0.0,
+            "reason": "AI classification was unavailable; category is a safe review fallback.",
+        }
+        base_result = _base_result(email, classification)
+        decision = decide_status(llm_error=error)
+        result = {**base_result, **decision}
+        result["warnings"].append(
+            "Email classification could not be completed; BL_COMPARISON is a safe fallback for human review."
+        )
+        assert_valid_result(result)
+        return result
+
     base_result = _base_result(email, classification)
     if classification["category"] != "BL_COMPARISON":
         result = _routing_result(base_result)
@@ -119,6 +166,7 @@ def process_email(
     if any(item.get("status") != "ok" for item in read_results.values()):
         decision = decide_status(reader_results=read_results)
         result = {**base_result, **decision}
+        _attach_reading_metadata(result, read_results)
         assert_valid_result(result)
         return result
 
@@ -126,10 +174,6 @@ def process_email(
         if llm_module is None:
             from backend import llm as llm_module
         extract_fn = llm_module.extract_fields
-    llm_error_type = llm_error_type or (
-        llm_module.LLMError if llm_module is not None else Exception
-    )
-
     try:
         si_fields = extract_fn(read_results["SI"]["text"], "SI")
         bl_fields = extract_fn(read_results["BL"]["text"], "BL")
@@ -142,6 +186,7 @@ def process_email(
         decision = decide_status(comparison)
 
     result = {**base_result, **decision}
+    _attach_reading_metadata(result, read_results)
     assert_valid_result(result)
     return result
 
