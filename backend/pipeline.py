@@ -1,0 +1,187 @@
+"""End-to-end orchestration for email classification and SI/BL verification."""
+
+import inspect
+from pathlib import Path
+
+from backend import compare
+from backend.decision import decide_status
+from backend.evidence import enrich_field_evidence
+from backend.loader import Inbox
+from backend.result_validator import assert_valid_result
+from backend.submission import load_expected_email_ids, write_submission
+
+
+class PipelineRunError(RuntimeError):
+    """Raised when a complete submission cannot be produced safely."""
+
+
+def identify_document_attachments(attachments):
+    """Find one SI and one BL using the official bundle filename convention."""
+    si_paths = []
+    bl_paths = []
+    for attachment in attachments or []:
+        name = Path(attachment).name.upper()
+        if "_SI." in name:
+            si_paths.append(attachment)
+        elif "_BL." in name:
+            bl_paths.append(attachment)
+
+    return {
+        "si": si_paths[0] if len(si_paths) == 1 else None,
+        "bl": bl_paths[0] if len(bl_paths) == 1 else None,
+        "missing_attachment": not si_paths or not bl_paths,
+        "wrong_doc_type": len(si_paths) > 1 or len(bl_paths) > 1,
+    }
+
+
+def _base_result(email, classification):
+    """Create the metadata shared by comparison and routing results."""
+    return {
+        "email_id": email["email_id"],
+        "email": {
+            "from": email.get("from", ""),
+            "subject": email.get("subject", ""),
+            "body": email.get("body", ""),
+            "attachments": list(email.get("attachments", [])),
+        },
+        "category": classification["category"],
+        "classification_confidence": classification.get("confidence", 0.0),
+        "classification_reason": classification.get("reason", ""),
+    }
+
+
+def _routing_result(base_result):
+    """Build a valid official result for a non-BL email category."""
+    return {
+        **base_result,
+        "status": "OK",
+        "review_reason": None,
+        "has_defect": False,
+        "defect_fields": [],
+        "comparisons": [],
+        "warnings": [],
+    }
+
+
+def _read_document(read_fn, path, use_ocr):
+    """Use the OCR option when supported, while remaining compatible with main."""
+    if "ocr" in inspect.signature(read_fn).parameters:
+        return read_fn(path, ocr=use_ocr)
+    return read_fn(path)
+
+
+def process_email(
+    email,
+    source,
+    *,
+    use_ocr=True,
+    classify_fn=None,
+    extract_fn=None,
+    read_fn=None,
+    compare_fn=None,
+    llm_error_type=None,
+):
+    """Process one local-bundle email and return a validated rich result."""
+    llm_module = None
+    if classify_fn is None:
+        from backend import llm as llm_module
+
+    classify_fn = classify_fn or llm_module.classify_email
+    compare_fn = compare_fn or compare.compare_fields
+
+    classification = classify_fn(email)
+    base_result = _base_result(email, classification)
+    if classification["category"] != "BL_COMPARISON":
+        result = _routing_result(base_result)
+        assert_valid_result(result)
+        return result
+
+    documents = identify_document_attachments(email.get("attachments", []))
+    if documents["wrong_doc_type"] or documents["missing_attachment"]:
+        decision = decide_status(
+            wrong_doc_type=documents["wrong_doc_type"],
+            missing_attachment=documents["missing_attachment"],
+        )
+        result = {**base_result, **decision}
+        assert_valid_result(result)
+        return result
+
+    if read_fn is None:
+        from backend import readers
+
+        read_fn = readers.read_attachment
+
+    source_path = Path(source)
+    read_results = {
+        "SI": _read_document(read_fn, source_path / documents["si"], use_ocr),
+        "BL": _read_document(read_fn, source_path / documents["bl"], use_ocr),
+    }
+    if any(item.get("status") != "ok" for item in read_results.values()):
+        decision = decide_status(reader_results=read_results)
+        result = {**base_result, **decision}
+        assert_valid_result(result)
+        return result
+
+    if extract_fn is None:
+        if llm_module is None:
+            from backend import llm as llm_module
+        extract_fn = llm_module.extract_fields
+    llm_error_type = llm_error_type or (
+        llm_module.LLMError if llm_module is not None else Exception
+    )
+
+    try:
+        si_fields = extract_fn(read_results["SI"]["text"], "SI")
+        bl_fields = extract_fn(read_results["BL"]["text"], "BL")
+        si_fields = enrich_field_evidence(si_fields, read_results["SI"])
+        bl_fields = enrich_field_evidence(bl_fields, read_results["BL"])
+    except llm_error_type as error:
+        decision = decide_status(llm_error=error)
+    else:
+        comparison = compare_fn(si_fields, bl_fields)
+        decision = decide_status(comparison)
+
+    result = {**base_result, **decision}
+    assert_valid_result(result)
+    return result
+
+
+def run_pipeline(source, *, emails=None, process_fn=None, **process_options):
+    """Process a complete inbox while collecting per-email failures."""
+    process_fn = process_fn or process_email
+    if emails is None:
+        emails = Inbox(str(source)).emails()
+
+    results = {}
+    errors = {}
+    for email in emails:
+        email_id = email.get("email_id", "<missing email_id>")
+        try:
+            results[email_id] = process_fn(
+                email,
+                source,
+                **process_options,
+            )
+        except Exception as error:  # one bad email must not stop the other 519
+            errors[email_id] = f"{type(error).__name__}: {str(error)[:300]}"
+    return results, errors
+
+
+def run_and_write_submission(
+    source,
+    output_path,
+    sample_submission_path,
+    **process_options,
+):
+    """Run every email and write a submission only when nothing failed."""
+    results, errors = run_pipeline(source, **process_options)
+    if errors:
+        preview = "; ".join(
+            f"{email_id}: {message}" for email_id, message in list(errors.items())[:5]
+        )
+        raise PipelineRunError(
+            f"{len(errors)} emails failed; submission was not written. {preview}"
+        )
+
+    expected_ids = load_expected_email_ids(sample_submission_path)
+    return write_submission(results, output_path, expected_ids)

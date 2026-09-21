@@ -4,7 +4,19 @@ The SI is the reference. This file has no AI in it: it is plain rules, so the sa
 input always gives the same answer.
 """
 import re
+import unicodedata
+from collections.abc import Mapping
+from decimal import Decimal
 from difflib import SequenceMatcher
+
+try:
+    from backend.normalizer import (
+        is_missing,
+        normalize_container_count,
+        normalize_weight_kg,
+    )
+except ModuleNotFoundError:  # Allow: python backend/test_compare.py
+    from normalizer import is_missing, normalize_container_count, normalize_weight_kg
 
 FIELDS = ["shipper", "consignee", "notify_party", "port_of_loading",
           "port_of_discharge", "container_count", "gross_weight_kg"]
@@ -18,10 +30,22 @@ WORD_MAP = {"LIMITED": "LTD", "COMPANY": "CO", "CORPORATION": "CORP",
 LOOKALIKE = 0.80  # names this similar (but not equal) are "too close to call"
 
 
+def _evidence_payload(evidence):
+    """Keep rich page evidence while accepting the original string format."""
+    if isinstance(evidence, Mapping):
+        payload = dict(evidence)
+        payload["snippet"] = str(payload.get("snippet") or "")
+        return payload if payload["snippet"] else None
+    if evidence:
+        return {"snippet": str(evidence)}
+    return None
+
+
 def _words(text):
     """Upper case, '&' -> AND, punctuation -> spaces, then a list of words."""
-    text = str(text).upper().replace("&", " AND ")
-    return re.sub(r"[^A-Z0-9]+", " ", text).split()
+    text = unicodedata.normalize("NFKC", str(text)).upper().replace("&", " AND ")
+    text = "".join(character if character.isalnum() else " " for character in text)
+    return text.split()
 
 
 def normalize_name(text):
@@ -45,6 +69,11 @@ def _same_port(si, bl):
     si_city, si_country = normalize_port(si)
     bl_city, bl_country = normalize_port(bl)
     if si_city != bl_city:
+        # Accept "NANTONG CHINA" and "NANTONG, CHINA" as the same port.
+        if si_country and bl_city == si_city + si_country:
+            return True
+        if bl_country and si_city == bl_city + bl_country:
+            return True
         return False
     # If only one side names a country, that is a formatting difference, not an error
     return si_country is None or bl_country is None or si_country == bl_country
@@ -66,7 +95,7 @@ def compare_field(field, si_value, bl_value):
     """
     result = {"field": field, "si_value": si_value, "bl_value": bl_value,
               "match": None, "confidence": 0.0}
-    if si_value is None or bl_value is None:
+    if is_missing(si_value) or is_missing(bl_value):
         return result
 
     if field in NAME_FIELDS:
@@ -77,9 +106,17 @@ def compare_field(field, si_value, bl_value):
         closeness = _similarity("".join(normalize_port(si_value)[0]),
                                 "".join(normalize_port(bl_value)[0]))
     elif field == "container_count":
-        equal, closeness = int(si_value) == int(bl_value), 0.0
+        a = normalize_container_count(si_value)
+        b = normalize_container_count(bl_value)
+        if a is None or b is None:
+            return result
+        equal, closeness = a == b, 0.0
     elif field == "gross_weight_kg":
-        equal, closeness = abs(float(si_value) - float(bl_value)) <= 0.5, 0.0
+        a = normalize_weight_kg(si_value)
+        b = normalize_weight_kg(bl_value)
+        if a is None or b is None:
+            return result
+        equal, closeness = abs(a - b) <= Decimal("0.5"), 0.0
     else:
         raise ValueError(f"Unknown field: {field}")
 
@@ -104,10 +141,12 @@ def compare_fields(si_fields, bl_fields):
     for field in FIELDS:
         si, bl = si_fields.get(field, {}), bl_fields.get(field, {})
         item = compare_field(field, si.get("value"), bl.get("value"))
-        if si.get("evidence"):
-            item["si_evidence"] = {"snippet": si["evidence"]}
-        if bl.get("evidence"):
-            item["bl_evidence"] = {"snippet": bl["evidence"]}
+        si_evidence = _evidence_payload(si.get("evidence"))
+        bl_evidence = _evidence_payload(bl.get("evidence"))
+        if si_evidence:
+            item["si_evidence"] = si_evidence
+        if bl_evidence:
+            item["bl_evidence"] = bl_evidence
         comparisons.append(item)
 
         if item["match"] is None:
