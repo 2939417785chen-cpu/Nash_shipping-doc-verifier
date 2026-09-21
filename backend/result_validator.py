@@ -2,7 +2,8 @@
 
 from collections.abc import Mapping
 
-from backend.comparison import COMPARISON_FIELDS, REVIEW_REASONS
+from backend.compare import FIELDS as COMPARISON_FIELDS
+from backend.decision import REVIEW_REASONS
 
 
 CATEGORIES = {
@@ -61,6 +62,7 @@ def _validate_comparisons(result, errors):
 
     seen_fields = set()
     mismatched_fields = []
+    missing_comparison_fields = []
     for index, comparison in enumerate(comparisons):
         if not isinstance(comparison, Mapping):
             errors.append(f"comparisons[{index}] must be an object")
@@ -75,18 +77,28 @@ def _validate_comparisons(result, errors):
         else:
             seen_fields.add(field)
 
-        if not isinstance(match, bool):
-            errors.append(f"comparisons[{index}].match must be a boolean")
+        if match is None and field in COMPARISON_FIELDS:
+            missing_comparison_fields.append(field)
+        elif not isinstance(match, bool):
+            errors.append(f"comparisons[{index}].match must be true, false, or null")
         elif not match and field in COMPARISON_FIELDS:
             mismatched_fields.append(field)
 
     status = result.get("status")
-    if status == "OK" and mismatched_fields:
-        errors.append("OK result cannot contain mismatched comparisons")
-    if status == "MISMATCH" and set(mismatched_fields) != set(
-        result.get("defect_fields", [])
-    ):
-        errors.append("comparison mismatches must equal defect_fields")
+    if status == "OK" and (mismatched_fields or missing_comparison_fields):
+        errors.append("OK result requires every comparison to match")
+
+    declared_missing = set(result.get("missing_fields", []))
+    if missing_comparison_fields and set(missing_comparison_fields) != declared_missing:
+        errors.append("null comparisons must equal missing_fields")
+
+    if status == "MISMATCH":
+        declared_defects = set(result.get("defect_fields", []))
+        declared_uncertain = set(result.get("uncertain_fields", []))
+        if set(mismatched_fields) != declared_defects | declared_uncertain:
+            errors.append(
+                "comparison mismatches must equal defect_fields plus uncertain_fields"
+            )
 
 
 def validate_result(result):

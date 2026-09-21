@@ -93,7 +93,10 @@ class ResultValidatorTests(unittest.TestCase):
 
         errors = validate_result(result)
 
-        self.assertIn("comparison mismatches must equal defect_fields", errors)
+        self.assertIn(
+            "comparison mismatches must equal defect_fields plus uncertain_fields",
+            errors,
+        )
 
     def test_assert_valid_result_returns_valid_input(self):
         self.assertIs(assert_valid_result(MISMATCH_RESULT), MISMATCH_RESULT)

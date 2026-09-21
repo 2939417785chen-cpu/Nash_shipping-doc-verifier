@@ -1,9 +1,9 @@
-"""Tests for field normalization and SI/BL comparison decisions."""
+"""Tests for the integrated normalizer and compare.py field engine."""
 
 from decimal import Decimal
 import unittest
 
-from backend.comparison import COMPARISON_FIELDS, compare_documents, review_result
+from backend.compare import FIELDS, compare_fields
 from backend.normalizer import (
     normalize_container_count,
     normalize_text,
@@ -11,7 +11,7 @@ from backend.normalizer import (
 )
 
 
-BASE_DOCUMENT = {
+BASE_VALUES = {
     "shipper": "APRIL FAR EAST (M) SDN BHD",
     "consignee": "EAST BRIGHT FZ-LLC",
     "notify_party": "EAST BRIGHT FZ-LLC",
@@ -20,6 +20,14 @@ BASE_DOCUMENT = {
     "container_count": 6,
     "gross_weight_kg": 131058,
 }
+
+
+def extracted_fields(**overrides):
+    values = {**BASE_VALUES, **overrides}
+    return {
+        field: {"value": value, "evidence": f"{field}: {value}"}
+        for field, value in values.items()
+    }
 
 
 class NormalizerTests(unittest.TestCase):
@@ -38,50 +46,54 @@ class NormalizerTests(unittest.TestCase):
 
 class ComparisonTests(unittest.TestCase):
     def test_all_fields_match_after_normalization(self):
-        draft_bl = dict(BASE_DOCUMENT)
-        draft_bl["consignee"] = "east bright fz llc"
-        draft_bl["port_of_loading"] = "Nantong China"
-        draft_bl["container_count"] = "6 containers"
-        draft_bl["gross_weight_kg"] = "131.058 MT"
+        si_fields = extracted_fields()
+        bl_fields = extracted_fields(
+            consignee="east bright fz llc",
+            port_of_loading="Nantong China",
+            container_count="6 containers",
+            gross_weight_kg="131.058 MT",
+        )
 
-        result = compare_documents(BASE_DOCUMENT, draft_bl)
+        result = compare_fields(si_fields, bl_fields)
 
-        self.assertEqual(result["status"], "OK")
-        self.assertFalse(result["has_defect"])
         self.assertEqual(result["defect_fields"], [])
-        self.assertEqual(len(result["comparisons"]), len(COMPARISON_FIELDS))
+        self.assertEqual(result["missing_fields"], [])
+        self.assertEqual(len(result["comparisons"]), len(FIELDS))
 
-    def test_difference_creates_mismatch_and_defect_field(self):
-        draft_bl = dict(BASE_DOCUMENT)
-        draft_bl["consignee"] = "UAB NOVAKOPA"
+    def test_difference_creates_defect_field(self):
+        result = compare_fields(
+            extracted_fields(),
+            extracted_fields(consignee="UAB NOVAKOPA"),
+        )
 
-        result = compare_documents(BASE_DOCUMENT, draft_bl)
-
-        self.assertEqual(result["status"], "MISMATCH")
-        self.assertTrue(result["has_defect"])
         self.assertEqual(result["defect_fields"], ["consignee"])
+        self.assertEqual(result["uncertain_fields"], [])
 
-    def test_missing_value_requires_review(self):
-        draft_bl = dict(BASE_DOCUMENT)
-        draft_bl["notify_party"] = ""
+    def test_missing_value_is_reported_separately(self):
+        result = compare_fields(
+            extracted_fields(),
+            extracted_fields(notify_party=None),
+        )
 
-        result = compare_documents(BASE_DOCUMENT, draft_bl)
-
-        self.assertEqual(result["status"], "NEEDS_REVIEW")
-        self.assertEqual(result["review_reason"], "missing_value")
         self.assertEqual(result["missing_fields"], ["notify_party"])
-        self.assertFalse(result["has_defect"])
+        self.assertEqual(result["defect_fields"], [])
 
-    def test_missing_document_requires_review(self):
-        result = compare_documents(BASE_DOCUMENT, None)
+    def test_similar_difference_is_uncertain(self):
+        result = compare_fields(
+            extracted_fields(),
+            extracted_fields(consignee="EAST BRIGHT FZ-LIC"),
+        )
 
-        self.assertEqual(result, review_result("missing_attachment"))
+        self.assertEqual(result["defect_fields"], ["consignee"])
+        self.assertEqual(result["uncertain_fields"], ["consignee"])
 
-    def test_explicit_unreadable_review_result(self):
-        result = review_result("unreadable")
+    def test_evidence_is_preserved_for_review_ui(self):
+        result = compare_fields(extracted_fields(), extracted_fields())
 
-        self.assertEqual(result["status"], "NEEDS_REVIEW")
-        self.assertEqual(result["review_reason"], "unreadable")
+        consignee = next(
+            item for item in result["comparisons"] if item["field"] == "consignee"
+        )
+        self.assertIn("consignee:", consignee["si_evidence"]["snippet"])
 
 
 if __name__ == "__main__":
