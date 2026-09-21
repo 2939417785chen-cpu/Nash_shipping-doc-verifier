@@ -99,6 +99,17 @@ def _is_retryable(error):
 
 
 _exhausted = set()  # models whose daily quota ran out during this run
+_last_call = 0.0    # when the last real Gemini call started
+
+
+def _wait_turn():
+    """The free tier allows 15 calls a minute, so keep a small gap between real calls."""
+    global _last_call
+    gap = float(os.getenv("GEMINI_MIN_GAP_SECONDS", "4.5"))
+    wait = gap - (time.time() - _last_call)
+    if wait > 0:
+        time.sleep(wait)
+    _last_call = time.time()
 
 
 def _fallback_models():
@@ -118,6 +129,7 @@ def _ask(model, contents):
     """Ask one model, up to 5 tries. Returns the answer as a dict, or raises LLMError."""
     for attempt in range(5):
         try:
+            _wait_turn()
             response = _get_client().models.generate_content(
                 model=model,
                 contents=contents,
