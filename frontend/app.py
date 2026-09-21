@@ -6,6 +6,10 @@ from pathlib import Path
 
 import streamlit as st
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from backend.loader import Inbox
 from backend.pipeline import process_email
 from frontend.view_model import (
