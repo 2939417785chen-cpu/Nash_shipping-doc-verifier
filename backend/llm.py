@@ -233,7 +233,8 @@ EXTRACT_PROMPT = """Read this {doc_type} document from a shipment and pull out s
 Labels differ between documents, so match by meaning, not by wording.
 
 Fields:
-- shipper: company name of the shipper / exporter. Name only, no street address.
+- shipper: company name of the shipper / exporter. Name only, no street address, city or postcode.
+  If the text says "X ON BEHALF OF Y", keep both companies in one value: "X ON BEHALF OF Y".
 - consignee: company that receives the cargo. It may be labelled Consignee, "To the Order of"
   or similar. Name only, no address.
 - notify_party: the notify party. Name only, no address.
