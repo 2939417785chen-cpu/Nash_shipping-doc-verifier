@@ -1,8 +1,29 @@
 # Nash Shipping Document Verifier
 
+## Live Demo
+
+https://2939417785chen-cpu-nash-shipping-doc-verifie-frontendapp-8ksdfo.streamlit.app/
+
+Select **Demo examples** in the sidebar — no API key or local setup is required.
+The public deployment intentionally excludes the organizer-provided dataset.
+Use **Live local dataset** only when running the project locally with the
+competition data folder available on your computer.
+
 An AI-assisted Streamlit application that classifies shipping emails, reads
 Shipping Instructions and draft Bills of Lading, compares seven required
 fields, and sends uncertain cases to human review with source evidence.
+
+## Problem and solution
+
+Shipping operations teams receive comparison requests, new document requests,
+invoice questions, general updates, and spam in the same inbox. For a document
+comparison, staff must read the Shipping Instruction (SI) and draft Bill of
+Lading (BL), then check seven shipment fields manually.
+
+Nash combines Gemini with deterministic Python rules. Gemini interprets
+unstructured emails and documents; Python normalizes and compares the official
+fields; Streamlit shows the result, source evidence, and cases that require a
+person to decide.
 
 ## What it does
 
@@ -14,6 +35,34 @@ fields, and sends uncertain cases to human review with source evidence.
 4. Returns `OK`, `MISMATCH`, or `NEEDS_REVIEW` using deterministic comparison
    and decision rules.
 5. Shows evidence snippets, page numbers, OCR provenance, and warnings in the UI.
+
+## Technical architecture
+
+```text
+Inbox JSON and attachments
+        ↓
+Document readers and Gemini OCR fallback
+        ↓
+Gemini classification and structured field extraction
+        ↓
+Deterministic normalization, comparison, and decision rules
+        ↓
+Streamlit review interface and validated submission JSON
+```
+
+Gemini is the cloud AI component. The application caches model results, spaces
+API calls, supports a fallback model, and returns `NEEDS_REVIEW` when it cannot
+make a dependable decision.
+
+## Validation
+
+- 50 automated tests cover normalization, comparison, decision rules,
+  evidence tracing, orchestration, output validation, and UI formatting.
+- Demo mode uses saved examples and does not consume Gemini quota.
+- Live mode connects the interface to the real processing pipeline.
+- Official self-evaluation score on the full 520-email dataset: **1.000**
+  (classification macro-F1 1.000 across all 5 categories; 46/46 defect emails
+  found with no false alarms; all 20 required human-review cases correctly escalated).
 
 ## Setup
 
