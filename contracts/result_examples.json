@@ -104,14 +104,30 @@
           "si_value": "EAST BRIGHT FZ-LLC",
           "bl_value": "UAB NOVAKOPA",
           "match": false,
-          "confidence": 0.99
+          "confidence": 0.99,
+          "si_evidence": {
+            "text": "CONSIGNEE: EAST BRIGHT FZ-LLC",
+            "source": "attachments/email_004_SI.txt"
+          },
+          "bl_evidence": {
+            "text": "CONSIGNEE: UAB NOVAKOPA",
+            "source": "attachments/email_004_BL.txt"
+          }
         },
         {
           "field": "notify_party",
           "si_value": "EAST BRIGHT FZ-LLC",
           "bl_value": "UAB NOVAKOPA",
           "match": false,
-          "confidence": 0.99
+          "confidence": 0.99,
+          "si_evidence": {
+            "text": "NOTIFY PARTY: EAST BRIGHT FZ-LLC",
+            "source": "attachments/email_004_SI.txt"
+          },
+          "bl_evidence": {
+            "text": "NOTIFY PARTY: UAB NOVAKOPA",
+            "source": "attachments/email_004_BL.txt"
+          }
         },
         {
           "field": "port_of_loading",
@@ -164,6 +180,78 @@
       "warnings": [
         "The draft Bill of Lading attachment is missing."
       ]
+    },
+    {
+      "email_id": "email_example_si_request",
+      "email": {
+        "from": "operations@example.com",
+        "subject": "Please prepare Shipping Instruction",
+        "body": "Please prepare the Shipping Instruction for the attached booking.",
+        "attachments": [
+          "attachments/booking_confirmation.pdf"
+        ]
+      },
+      "category": "SI_REQUEST",
+      "classification_confidence": 0.96,
+      "status": "OK",
+      "review_reason": null,
+      "has_defect": false,
+      "defect_fields": [],
+      "comparisons": [],
+      "warnings": []
+    },
+    {
+      "email_id": "email_example_invoice",
+      "email": {
+        "from": "accounts@example.com",
+        "subject": "Question about invoice INV-2026-104",
+        "body": "Could you confirm the surcharge shown on this invoice?",
+        "attachments": [
+          "attachments/invoice_INV-2026-104.pdf"
+        ]
+      },
+      "category": "INVOICE_QUERY",
+      "classification_confidence": 0.94,
+      "status": "OK",
+      "review_reason": null,
+      "has_defect": false,
+      "defect_fields": [],
+      "comparisons": [],
+      "warnings": []
+    },
+    {
+      "email_id": "email_example_general",
+      "email": {
+        "from": "customer@example.com",
+        "subject": "Office hours enquiry",
+        "body": "Could you tell me your office hours for next week?",
+        "attachments": []
+      },
+      "category": "GENERAL",
+      "classification_confidence": 0.91,
+      "status": "OK",
+      "review_reason": null,
+      "has_defect": false,
+      "defect_fields": [],
+      "comparisons": [],
+      "warnings": []
+    },
+    {
+      "email_id": "email_example_spam",
+      "email": {
+        "from": "promotion@example.net",
+        "subject": "You have won a free prize",
+        "body": "Click this link immediately to claim your prize.",
+        "attachments": []
+      },
+      "category": "SPAM",
+      "classification_confidence": 0.99,
+      "status": "OK",
+      "review_reason": null,
+      "has_defect": false,
+      "defect_fields": [],
+      "comparisons": [],
+      "warnings": []
     }
   ]
 }
