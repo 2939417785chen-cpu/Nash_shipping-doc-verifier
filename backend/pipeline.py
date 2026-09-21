@@ -255,7 +255,12 @@ def process_email(
         decision = decide_status(llm_error=error)
     else:
         comparison = compare_fn(si_fields, bl_fields)
+        if not any(item.get("ocr") for item in read_results.values()):
+            # Both documents were read as text, so two values that differ are really
+            # different. "Look-alike, please check" only makes sense when a picture was read.
+            comparison = {**comparison, "uncertain_fields": []}
         decision = decide_status(comparison)
+        
         if OCR_NEEDS_REVIEW and any(item.get("ocr") for item in read_results.values()):
             decision = review_decision(
                 "unreadable",
