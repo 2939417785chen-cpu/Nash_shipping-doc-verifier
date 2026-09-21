@@ -5,6 +5,7 @@ input always gives the same answer.
 """
 import re
 import unicodedata
+from collections.abc import Mapping
 from decimal import Decimal
 from difflib import SequenceMatcher
 
@@ -27,6 +28,17 @@ WORD_MAP = {"LIMITED": "LTD", "COMPANY": "CO", "CORPORATION": "CORP",
             "INCORPORATED": "INC", "BERHAD": "BHD", "PRIVATE": "PVT"}
 
 LOOKALIKE = 0.80  # names this similar (but not equal) are "too close to call"
+
+
+def _evidence_payload(evidence):
+    """Keep rich page evidence while accepting the original string format."""
+    if isinstance(evidence, Mapping):
+        payload = dict(evidence)
+        payload["snippet"] = str(payload.get("snippet") or "")
+        return payload if payload["snippet"] else None
+    if evidence:
+        return {"snippet": str(evidence)}
+    return None
 
 
 def _words(text):
@@ -129,10 +141,12 @@ def compare_fields(si_fields, bl_fields):
     for field in FIELDS:
         si, bl = si_fields.get(field, {}), bl_fields.get(field, {})
         item = compare_field(field, si.get("value"), bl.get("value"))
-        if si.get("evidence"):
-            item["si_evidence"] = {"snippet": si["evidence"]}
-        if bl.get("evidence"):
-            item["bl_evidence"] = {"snippet": bl["evidence"]}
+        si_evidence = _evidence_payload(si.get("evidence"))
+        bl_evidence = _evidence_payload(bl.get("evidence"))
+        if si_evidence:
+            item["si_evidence"] = si_evidence
+        if bl_evidence:
+            item["bl_evidence"] = bl_evidence
         comparisons.append(item)
 
         if item["match"] is None:

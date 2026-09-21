@@ -5,6 +5,7 @@ from pathlib import Path
 
 from backend import compare
 from backend.decision import decide_status
+from backend.evidence import enrich_field_evidence
 from backend.loader import Inbox
 from backend.result_validator import assert_valid_result
 from backend.submission import load_expected_email_ids, write_submission
@@ -132,6 +133,8 @@ def process_email(
     try:
         si_fields = extract_fn(read_results["SI"]["text"], "SI")
         bl_fields = extract_fn(read_results["BL"]["text"], "BL")
+        si_fields = enrich_field_evidence(si_fields, read_results["SI"])
+        bl_fields = enrich_field_evidence(bl_fields, read_results["BL"])
     except llm_error_type as error:
         decision = decide_status(llm_error=error)
     else:

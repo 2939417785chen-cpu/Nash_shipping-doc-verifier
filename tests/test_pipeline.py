@@ -98,6 +98,39 @@ class ProcessEmailTests(unittest.TestCase):
         self.assertEqual(result["defect_fields"], ["consignee"])
         self.assertEqual(len(result["comparisons"]), 7)
 
+    def test_pipeline_adds_document_page_to_evidence(self):
+        def read_with_pages(path, ocr=True):
+            doc_type = "SI" if "_SI." in str(path) else "BL"
+            values = dict(BASE_VALUES)
+            if doc_type == "BL":
+                values["consignee"] = "UAB NOVAKOPA"
+            evidence_lines = [f"{field}: {value}" for field, value in values.items()]
+            return {
+                "text": "\n".join(evidence_lines),
+                "pages": ["cover", "\n".join(evidence_lines)],
+                "status": "ok",
+                "note": "",
+                "ocr": False,
+            }
+
+        result = process_email(
+            email_record(
+                "attachments/email_004_SI.txt",
+                "attachments/email_004_BL.txt",
+            ),
+            "data",
+            classify_fn=classify(),
+            read_fn=read_with_pages,
+            extract_fn=extract_with_bl_mismatch,
+        )
+
+        consignee = next(
+            item for item in result["comparisons"] if item["field"] == "consignee"
+        )
+        self.assertEqual(consignee["si_evidence"]["page"], 2)
+        self.assertTrue(consignee["si_evidence"]["verified"])
+        self.assertEqual(consignee["bl_evidence"]["page"], 2)
+
     def test_missing_bl_attachment_requires_review(self):
         result = process_email(
             email_record("attachments/email_004_SI.txt"),
