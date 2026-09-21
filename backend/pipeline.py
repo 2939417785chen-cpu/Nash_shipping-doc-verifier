@@ -3,8 +3,8 @@
 import inspect
 from pathlib import Path
 
-from backend import compare
-from backend.decision import decide_status
+from backend import compare, rules
+from backend.decision import decide_status, review_decision
 from backend.evidence import enrich_field_evidence
 from backend.loader import Inbox
 from backend.result_validator import assert_valid_result
@@ -13,6 +13,27 @@ from backend.submission import load_expected_email_ids, write_submission
 
 class PipelineRunError(RuntimeError):
     """Raised when a complete submission cannot be produced safely."""
+
+
+# True: a document that was read from a picture by AI vision (OCR) always goes to a person.
+OCR_NEEDS_REVIEW = True
+
+DRAFT_REQUEST_REASON = (
+    "Rule: the sender asks for the draft BL to be sent and nothing is attached, "
+    "so this is a document-check request with nothing to compare yet."
+)
+DRAFT_REQUEST_WARNING = (
+    "The sender asks for the draft BL to be sent. No documents were attached, "
+    "so there is nothing to compare yet."
+)
+_ROLE_NAMES = {"SI": "Shipping Instruction", "BL": "draft Bill of Lading"}
+_KIND_NAMES = {
+    "SI": "Shipping Instruction",
+    "BL": "Bill of Lading",
+    "PACKING_LIST": "Packing List",
+    "COMMERCIAL_INVOICE": "Commercial Invoice",
+    "CERTIFICATE_OF_ORIGIN": "Certificate of Origin",
+}
 
 
 def identify_document_attachments(attachments):
@@ -117,6 +138,17 @@ def process_email(
         llm_module.LLMError if llm_module is not None else Exception
     )
 
+    if rules.is_draft_bl_request(email):
+        classification = {
+            "category": "BL_COMPARISON",
+            "confidence": 0.95,
+            "reason": DRAFT_REQUEST_REASON,
+        }
+        result = _routing_result(_base_result(email, classification))
+        result["warnings"].append(DRAFT_REQUEST_WARNING)
+        assert_valid_result(result)
+        return result
+
     try:
         classification = classify_fn(email)
     except llm_error_type as error:
@@ -170,6 +202,46 @@ def process_email(
         assert_valid_result(result)
         return result
 
+    wrong_kinds = {
+        role: rules.document_kind(read_results[role]["text"])
+        for role in ("SI", "BL")
+        if rules.is_wrong_document(role, read_results[role]["text"])
+    }
+    if wrong_kinds:
+        decision = decide_status(wrong_doc_type=True)
+        decision["warnings"] = [
+            f"The {role} attachment looks like a {_KIND_NAMES.get(kind, kind)}, "
+            f"not a {_ROLE_NAMES[role]}."
+            for role, kind in wrong_kinds.items()
+        ]
+        result = {**base_result, **decision}
+        _attach_reading_metadata(result, read_results)
+        assert_valid_result(result)
+        return result
+
+    blank_fields = {
+        role: rules.blank_required_fields(read_results[role]["text"])
+        for role in ("SI", "BL")
+    }
+    if any(blank_fields.values()):
+        missing = [
+            field
+            for field in compare.FIELDS
+            if any(field in fields for fields in blank_fields.values())
+        ]
+        details = "; ".join(
+            f"{role}: {', '.join(fields)}" for role, fields in blank_fields.items() if fields
+        )
+        decision = review_decision(
+            "missing_value",
+            warning=f"Required fields are blank or contain a placeholder ({details}).",
+        )
+        decision["missing_fields"] = missing
+        result = {**base_result, **decision}
+        _attach_reading_metadata(result, read_results)
+        assert_valid_result(result)
+        return result
+
     if extract_fn is None:
         if llm_module is None:
             from backend import llm as llm_module
@@ -184,6 +256,17 @@ def process_email(
     else:
         comparison = compare_fn(si_fields, bl_fields)
         decision = decide_status(comparison)
+        if OCR_NEEDS_REVIEW and any(item.get("ocr") for item in read_results.values()):
+            decision = review_decision(
+                "unreadable",
+                comparisons=list(comparison.get("comparisons", [])),
+                warning=(
+                    "One or more documents were read from a picture by AI vision (OCR). "
+                    "A person should confirm the values before this result is final."
+                ),
+            )
+            decision["missing_fields"] = list(comparison.get("missing_fields", []))
+            decision["uncertain_fields"] = list(comparison.get("uncertain_fields", []))
 
     result = {**base_result, **decision}
     _attach_reading_metadata(result, read_results)
