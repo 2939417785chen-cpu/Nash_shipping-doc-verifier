@@ -71,6 +71,23 @@ class AttachmentTests(unittest.TestCase):
 
 
 class ProcessEmailTests(unittest.TestCase):
+    def test_classification_quota_failure_becomes_human_review(self):
+        def failing_classify(_email):
+            raise FakeLLMError("All models have used up their quota for now")
+
+        result = process_email(
+            email_record(),
+            "data",
+            classify_fn=failing_classify,
+            llm_error_type=FakeLLMError,
+        )
+
+        self.assertEqual(result["category"], "BL_COMPARISON")
+        self.assertEqual(result["classification_confidence"], 0.0)
+        self.assertEqual(result["status"], "NEEDS_REVIEW")
+        self.assertEqual(result["review_reason"], "unreadable")
+        self.assertTrue(any("classification" in item.lower() for item in result["warnings"]))
+
     def test_non_bl_email_stops_after_classification(self):
         result = process_email(
             email_record(),
@@ -130,6 +147,31 @@ class ProcessEmailTests(unittest.TestCase):
         self.assertEqual(consignee["si_evidence"]["page"], 2)
         self.assertTrue(consignee["si_evidence"]["verified"])
         self.assertEqual(consignee["bl_evidence"]["page"], 2)
+
+    def test_successful_ocr_is_exposed_for_human_oversight(self):
+        def read_with_ocr(_path, ocr=True):
+            return {
+                "text": "document text",
+                "pages": ["document text"],
+                "status": "ok",
+                "note": "Read from a picture by AI vision (OCR)",
+                "ocr": True,
+            }
+
+        result = process_email(
+            email_record(
+                "attachments/email_004_SI.pdf",
+                "attachments/email_004_BL.pdf",
+            ),
+            "data",
+            classify_fn=classify(),
+            read_fn=read_with_ocr,
+            extract_fn=extract_with_bl_mismatch,
+        )
+
+        self.assertTrue(result["document_reading"]["SI"]["ocr"])
+        self.assertEqual(result["document_reading"]["BL"]["pages"], 1)
+        self.assertTrue(any("AI OCR was used" in item for item in result["warnings"]))
 
     def test_missing_bl_attachment_requires_review(self):
         result = process_email(
