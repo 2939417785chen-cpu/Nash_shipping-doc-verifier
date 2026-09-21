@@ -98,20 +98,24 @@ def _is_retryable(error):
                ("429", "500", "503", "504", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE", "timed out"))
 
 
-def call_json(prompt, use_cache=True, images=None):
-    """Send a prompt (and maybe pictures), get a dict back. Cached, and retried if Google is busy.
+_exhausted = set()  # models whose daily quota ran out during this run
 
-    images is a list of (bytes, mime_type), for example [(png_bytes, "image/png")].
+
+def _fallback_models():
+    """Other models to try when the main one has no quota left.
+
+    Set GEMINI_FALLBACK_MODELS in .env, for example gemini-3.1-flash-lite (comma separated).
     """
-    model = _get_model()
-    images = images or []
-    fingerprint = model + "\n" + prompt + "".join(hashlib.sha256(data).hexdigest() for data, _ in images)
-    cache_file = CACHE_DIR / (hashlib.sha256(fingerprint.encode()).hexdigest() + ".json")
-    if use_cache and cache_file.exists():
-        return json.loads(cache_file.read_text())
+    names = os.getenv("GEMINI_FALLBACK_MODELS", "")
+    return [n.strip().replace("models/", "") for n in names.split(",") if n.strip()]
 
-    contents = [types.Part.from_bytes(data=data, mime_type=mime) for data, mime in images] + [prompt]
-    last_error = None
+
+def _is_quota_error(message):
+    return "429" in message or "RESOURCE_EXHAUSTED" in message
+
+
+def _ask(model, contents):
+    """Ask one model, up to 5 tries. Returns the answer as a dict, or raises LLMError."""
     for attempt in range(5):
         try:
             response = _get_client().models.generate_content(
@@ -120,17 +124,44 @@ def call_json(prompt, use_cache=True, images=None):
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json", temperature=0),
             )
-            data = _parse_json(response.text)
-            break
+            return _parse_json(response.text)
         except LLMError:
             raise
         except Exception as e:
-            last_error = e
             if not _is_retryable(e) or attempt == 4:
-                raise LLMError(f"AI call failed: {type(e).__name__}: {str(e)[:150]}") from e
+                raise LLMError(f"AI call failed ({model}): {type(e).__name__}: {str(e)[:150]}") from e
             time.sleep(3 * 2 ** attempt)  # wait 3s, 6s, 12s, 24s
+    raise LLMError(f"AI call failed ({model})")
+
+
+def call_json(prompt, use_cache=True, images=None):
+    """Send a prompt (and maybe pictures), get a dict back.
+
+    Answers are cached (the model name is not part of the cache key, so an answer
+    stays valid if we switch model; delete backend/.cache to ask everything again).
+    If a model has no daily quota left, the next model in GEMINI_FALLBACK_MODELS is used.
+    images is a list of (bytes, mime_type), for example [(png_bytes, "image/png")].
+    """
+    images = images or []
+    fingerprint = prompt + "".join(hashlib.sha256(data).hexdigest() for data, _ in images)
+    cache_file = CACHE_DIR / (hashlib.sha256(fingerprint.encode()).hexdigest() + ".json")
+    if use_cache and cache_file.exists():
+        return json.loads(cache_file.read_text())
+
+    contents = [types.Part.from_bytes(data=data, mime_type=mime) for data, mime in images] + [prompt]
+    models = [m for m in [_get_model()] + _fallback_models() if m not in _exhausted]
+    last_error = None
+    for model in models:
+        try:
+            data = _ask(model, contents)
+            break
+        except LLMError as e:
+            last_error = e
+            if not _is_quota_error(str(e)):
+                raise
+            _exhausted.add(model)  # its quota is gone: skip it from now on
     else:
-        raise LLMError("AI call failed") from last_error
+        raise LLMError("All models have used up their quota for now") from last_error
 
     CACHE_DIR.mkdir(exist_ok=True)
     cache_file.write_text(json.dumps(data, ensure_ascii=False))
